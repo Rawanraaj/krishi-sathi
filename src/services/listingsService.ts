@@ -89,44 +89,74 @@ const MOCK_NEPAL_LISTINGS: CropListing[] = [
   }
 ];
 
-export async function getAllListings(): Promise<CropListing[]> {
-  try {
-    const q = query(collection(db, 'listings'), orderBy('createdAt', 'desc'));
-    const snapshot = await getDocs(q);
-    const results: CropListing[] = [];
-    snapshot.forEach((docSnap) => {
-      const data = docSnap.data();
-      results.push({
-        id: docSnap.id,
-        farmerId: data.farmerId,
-        farmerName: data.farmerName || 'Farmer',
-        cropName: data.cropName,
-        quantity: data.quantity,
-        unit: data.unit,
-        pricePerUnit: data.pricePerUnit,
-        location: data.location,
-        contactInfo: data.contactInfo,
-        createdAt: data.createdAt,
-        description: data.description,
-        imageUrl: data.imageUrl
+/**
+ * Timeout helper function to prevent Firestore network operations from hanging indefinitely.
+ */
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number = 5000): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`Firestore operation timed out after ${timeoutMs / 1000}s.`));
+    }, timeoutMs);
+
+    promise
+      .then((res) => {
+        clearTimeout(timer);
+        resolve(res);
+      })
+      .catch((err) => {
+        clearTimeout(timer);
+        reject(err);
       });
-    });
-    
-    // Combine with custom locally stored listings if any, or seed default items
-    const localSaved = localStorage.getItem('krishi_sathi_local_listings');
-    const customListings: CropListing[] = localSaved ? JSON.parse(localSaved) : [];
-    
-    const combined = [...customListings, ...results];
-    if (combined.length === 0) {
-      return MOCK_NEPAL_LISTINGS;
+  });
+}
+
+export async function getAllListings(): Promise<CropListing[]> {
+  const apiKey = import.meta.env.VITE_FIREBASE_API_KEY;
+  const isFirebaseConfigured = Boolean(apiKey && apiKey !== 'demo-api-key' && apiKey.trim() !== '');
+
+  if (isFirebaseConfigured) {
+    try {
+      const q = query(collection(db, 'listings'), orderBy('createdAt', 'desc'));
+      const snapshot = await withTimeout(getDocs(q), 5000);
+      const results: CropListing[] = [];
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        results.push({
+          id: docSnap.id,
+          farmerId: data.farmerId,
+          farmerName: data.farmerName || 'Farmer',
+          cropName: data.cropName,
+          quantity: data.quantity,
+          unit: data.unit,
+          pricePerUnit: data.pricePerUnit,
+          location: data.location,
+          contactInfo: data.contactInfo,
+          createdAt: data.createdAt,
+          description: data.description,
+          imageUrl: data.imageUrl
+        });
+      });
+      
+      const localSaved = localStorage.getItem('krishi_sathi_local_listings');
+      const customListings: CropListing[] = localSaved ? JSON.parse(localSaved) : [];
+      
+      const combined = [...customListings, ...results];
+      if (combined.length === 0) {
+        return MOCK_NEPAL_LISTINGS;
+      }
+      return combined;
+    } catch (error) {
+      console.error('Firestore getAllListings failed or timed out:', error);
+      const localSaved = localStorage.getItem('krishi_sathi_local_listings');
+      const customListings: CropListing[] = localSaved ? JSON.parse(localSaved) : [];
+      return [...customListings, ...MOCK_NEPAL_LISTINGS];
     }
-    return combined;
-  } catch (error) {
-    console.warn('Firestore listing fetch fallback to mock datasets:', error);
-    const localSaved = localStorage.getItem('krishi_sathi_local_listings');
-    const customListings: CropListing[] = localSaved ? JSON.parse(localSaved) : [];
-    return [...customListings, ...MOCK_NEPAL_LISTINGS];
   }
+
+  // Demo fallback
+  const localSaved = localStorage.getItem('krishi_sathi_local_listings');
+  const customListings: CropListing[] = localSaved ? JSON.parse(localSaved) : [];
+  return [...customListings, ...MOCK_NEPAL_LISTINGS];
 }
 
 export async function addListing(listingData: Omit<CropListing, 'id' | 'createdAt'>): Promise<CropListing> {
@@ -136,26 +166,41 @@ export async function addListing(listingData: Omit<CropListing, 'id' | 'createdA
     createdAt: new Date().toISOString()
   };
 
-  try {
-    const docRef = await addDoc(collection(db, 'listings'), {
-      farmerId: newListing.farmerId,
-      farmerName: newListing.farmerName || 'Farmer',
-      cropName: newListing.cropName,
-      quantity: newListing.quantity,
-      unit: newListing.unit,
-      pricePerUnit: newListing.pricePerUnit,
-      location: newListing.location,
-      contactInfo: newListing.contactInfo,
-      createdAt: newListing.createdAt,
-      description: newListing.description || '',
-      imageUrl: newListing.imageUrl || ''
-    });
-    newListing.id = docRef.id;
-  } catch (error) {
-    console.warn('Firestore add listing fallback to local state:', error);
+  const apiKey = import.meta.env.VITE_FIREBASE_API_KEY;
+  const isFirebaseConfigured = Boolean(apiKey && apiKey !== 'demo-api-key' && apiKey.trim() !== '');
+
+  if (isFirebaseConfigured) {
+    try {
+      const docRef = await withTimeout(
+        addDoc(collection(db, 'listings'), {
+          farmerId: newListing.farmerId,
+          farmerName: newListing.farmerName || 'Farmer',
+          cropName: newListing.cropName,
+          quantity: newListing.quantity,
+          unit: newListing.unit,
+          pricePerUnit: newListing.pricePerUnit,
+          location: newListing.location,
+          contactInfo: newListing.contactInfo,
+          createdAt: newListing.createdAt,
+          description: newListing.description || '',
+          imageUrl: newListing.imageUrl || ''
+        }),
+        5000
+      );
+      newListing.id = docRef.id;
+    } catch (error: any) {
+      console.error('Firestore addListing failed:', error);
+      if (error?.code === 'permission-denied') {
+        throw new Error('Firestore security rules blocked publishing this listing (permission-denied).');
+      }
+      // Log error clearly and fall back to local persistence so user doesn't lose data
+      console.warn('Falling back to local listing storage due to Firestore write error.');
+    }
+  } else {
+    console.info('Firebase API key not set in .env. Saving crop listing locally for demo.');
   }
 
-  // Always save locally so offline / demo mode retains new farmer posts
+  // Save to local storage for immediate UI availability & offline support
   const existing = localStorage.getItem('krishi_sathi_local_listings');
   const customListings: CropListing[] = existing ? JSON.parse(existing) : [];
   customListings.unshift(newListing);

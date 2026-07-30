@@ -1,6 +1,7 @@
 import React from 'react';
 import { useListings } from '../../viewmodels/useListings';
 import { useFavorites } from '../../viewmodels/useFavorites';
+import { useOrders } from '../../viewmodels/useOrders';
 import { useAuth } from '../../viewmodels/useAuth';
 import { ListingCard } from '../components/ListingCard';
 
@@ -18,6 +19,7 @@ export const ListingsView: React.FC = () => {
 
   const { userProfile } = useAuth();
   const { isFavorited, toggleFavorite } = useFavorites();
+  const { placeOrder } = useOrders();
 
   return (
     <main className="page-wrapper">
@@ -141,6 +143,10 @@ export const ListingsView: React.FC = () => {
                 isFavorited={isFavorited(crop.id)}
                 onToggleFavorite={userProfile ? toggleFavorite : undefined}
                 canFavorite={!!userProfile}
+                onPlaceOrder={userProfile?.role === 'buyer' ? placeOrder : undefined}
+                currentUserId={userProfile?.uid}
+                currentUserName={userProfile?.email.split('@')[0]}
+                currentUserRole={userProfile?.role}
               />
             ))}
           </div>

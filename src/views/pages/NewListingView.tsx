@@ -51,7 +51,8 @@ export const NewListingView: React.FC = () => {
 
       navigate('/listings');
     } catch (err: any) {
-      setError(err?.message || 'Failed to submit crop listing. Please try again.');
+      console.error('Submit crop listing error:', err);
+      setError(err?.message || 'Failed to publish listing. Please try again.');
     } finally {
       setSubmitting(false);
     }

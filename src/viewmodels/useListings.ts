@@ -17,6 +17,7 @@ export function useListings() {
       const data = await getAllListings();
       setListings(data);
     } catch (err: any) {
+      console.error('Error loading listings in useListings ViewModel:', err);
       setError(err?.message || 'Failed to load crop listings');
     } finally {
       setLoading(false);
@@ -46,13 +47,16 @@ export function useListings() {
 
   const postListing = async (newCrop: Omit<CropListing, 'id' | 'createdAt'>) => {
     setLoading(true);
+    setError(null);
     try {
       const created = await addListing(newCrop);
       setListings((prev) => [created, ...prev]);
       return created;
     } catch (err: any) {
-      setError(err?.message || 'Failed to post new crop listing');
-      throw err;
+      console.error('Error posting listing in useListings ViewModel:', err);
+      const msg = err?.message || 'Failed to publish listing. Please try again.';
+      setError(msg);
+      throw new Error(msg);
     } finally {
       setLoading(false);
     }
