@@ -188,19 +188,19 @@ export async function addListing(listingData: Omit<CropListing, 'id' | 'createdA
         5000
       );
       newListing.id = docRef.id;
+      return newListing;
     } catch (error: any) {
       console.error('Firestore addListing failed:', error);
       if (error?.code === 'permission-denied') {
         throw new Error('Firestore security rules blocked publishing this listing (permission-denied).');
       }
-      // Log error clearly and fall back to local persistence so user doesn't lose data
       console.warn('Falling back to local listing storage due to Firestore write error.');
     }
   } else {
     console.info('Firebase API key not set in .env. Saving crop listing locally for demo.');
   }
 
-  // Save to local storage for immediate UI availability & offline support
+  // Save to local storage only when Firebase is unconfigured or failed
   const existing = localStorage.getItem('krishi_sathi_local_listings');
   const customListings: CropListing[] = existing ? JSON.parse(existing) : [];
   customListings.unshift(newListing);
@@ -255,6 +255,8 @@ export async function updateListing(
 }
 
 export async function deleteListing(listingId: string): Promise<void> {
+  console.log(`[deleteListing] Deleting listing document with ID: "${listingId}"`);
+
   const apiKey = import.meta.env.VITE_FIREBASE_API_KEY;
   const isFirebaseConfigured = Boolean(apiKey && apiKey !== 'demo-api-key' && apiKey.trim() !== '');
 
@@ -264,6 +266,7 @@ export async function deleteListing(listingId: string): Promise<void> {
         deleteDoc(doc(db, 'listings', listingId)),
         5000
       );
+      console.log(`[deleteListing] Firestore deleteDoc successfully executed for ID: "${listingId}"`);
     } catch (error: any) {
       console.error('Firestore deleteListing failed:', error);
       if (error?.code === 'permission-denied') {

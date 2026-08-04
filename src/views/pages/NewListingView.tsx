@@ -22,6 +22,8 @@ export const NewListingView: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submitting) return;
+
     setError(null);
 
     if (!cropName || !quantity || !pricePerUnit || !location || !contactInfo) {
@@ -53,7 +55,6 @@ export const NewListingView: React.FC = () => {
     } catch (err: any) {
       console.error('Submit crop listing error:', err);
       setError(err?.message || 'Failed to publish listing. Please try again.');
-    } finally {
       setSubmitting(false);
     }
   };
