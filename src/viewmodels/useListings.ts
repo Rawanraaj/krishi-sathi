@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import type { CropListing } from '../models/listing';
-import { getAllListings, addListing } from '../services/listingsService';
+import { getAllListings, addListing, updateListing, deleteListing } from '../services/listingsService';
 
 export function useListings() {
   const [listings, setListings] = useState<CropListing[]>([]);
@@ -62,6 +62,42 @@ export function useListings() {
     }
   };
 
+  const editListing = async (
+    listingId: string,
+    updatedFields: Partial<Omit<CropListing, 'id' | 'farmerId' | 'createdAt'>>
+  ) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const updated = await updateListing(listingId, updatedFields);
+      setListings((prev) => prev.map((l) => (l.id === listingId ? updated : l)));
+      return updated;
+    } catch (err: any) {
+      console.error('Error editing listing in useListings ViewModel:', err);
+      const msg = err?.message || 'Failed to update listing. Please try again.';
+      setError(msg);
+      throw new Error(msg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const removeListing = async (listingId: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      await deleteListing(listingId);
+      setListings((prev) => prev.filter((l) => l.id !== listingId));
+    } catch (err: any) {
+      console.error('Error removing listing in useListings ViewModel:', err);
+      const msg = err?.message || 'Failed to delete listing. Please try again.';
+      setError(msg);
+      throw new Error(msg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return {
     listings,
     filteredListings,
@@ -73,6 +109,9 @@ export function useListings() {
     setSelectedLocation,
     locations: uniqueLocations,
     postListing,
+    editListing,
+    removeListing,
     refresh: loadListings
   };
 }
+

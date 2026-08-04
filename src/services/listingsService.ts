@@ -1,4 +1,4 @@
-import { collection, addDoc, getDocs, query, orderBy } from 'firebase/firestore';
+import { collection, addDoc, getDocs, query, orderBy, doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db } from './firebase';
 import type { CropListing } from '../models/listing';
 
@@ -207,6 +207,79 @@ export async function addListing(listingData: Omit<CropListing, 'id' | 'createdA
   localStorage.setItem('krishi_sathi_local_listings', JSON.stringify(customListings));
 
   return newListing;
+}
+
+export async function updateListing(
+  listingId: string,
+  updatedFields: Partial<Omit<CropListing, 'id' | 'farmerId' | 'createdAt'>>
+): Promise<CropListing> {
+  const apiKey = import.meta.env.VITE_FIREBASE_API_KEY;
+  const isFirebaseConfigured = Boolean(apiKey && apiKey !== 'demo-api-key' && apiKey.trim() !== '');
+
+  if (isFirebaseConfigured && !listingId.startsWith('crop-') && !listingId.startsWith('listing-')) {
+    try {
+      await withTimeout(
+        updateDoc(doc(db, 'listings', listingId), updatedFields),
+        5000
+      );
+    } catch (error: any) {
+      console.error('Firestore updateListing failed:', error);
+      if (error?.code === 'permission-denied') {
+        throw new Error('Firestore security rules blocked updating this listing (permission-denied).');
+      }
+      console.warn('Falling back to local listing storage due to Firestore update error.');
+    }
+  }
+
+  // Update local storage representation if stored locally or as local override
+  const existing = localStorage.getItem('krishi_sathi_local_listings');
+  const customListings: CropListing[] = existing ? JSON.parse(existing) : [];
+  const idx = customListings.findIndex((l) => l.id === listingId);
+
+  if (idx >= 0) {
+    customListings[idx] = { ...customListings[idx], ...updatedFields };
+    localStorage.setItem('krishi_sathi_local_listings', JSON.stringify(customListings));
+    return customListings[idx];
+  } else {
+    // If it's a mock item or remote item not in local storage yet, create/update local override copy
+    const all = await getAllListings();
+    const current = all.find((l) => l.id === listingId);
+    if (!current) {
+      throw new Error('Listing not found');
+    }
+    const updated: CropListing = { ...current, ...updatedFields };
+    customListings.unshift(updated);
+    localStorage.setItem('krishi_sathi_local_listings', JSON.stringify(customListings));
+    return updated;
+  }
+}
+
+export async function deleteListing(listingId: string): Promise<void> {
+  const apiKey = import.meta.env.VITE_FIREBASE_API_KEY;
+  const isFirebaseConfigured = Boolean(apiKey && apiKey !== 'demo-api-key' && apiKey.trim() !== '');
+
+  if (isFirebaseConfigured && !listingId.startsWith('crop-') && !listingId.startsWith('listing-')) {
+    try {
+      await withTimeout(
+        deleteDoc(doc(db, 'listings', listingId)),
+        5000
+      );
+    } catch (error: any) {
+      console.error('Firestore deleteListing failed:', error);
+      if (error?.code === 'permission-denied') {
+        throw new Error('Firestore security rules blocked deleting this listing (permission-denied).');
+      }
+      console.warn('Falling back to local listing deletion due to Firestore delete error.');
+    }
+  }
+
+  // Remove from local storage
+  const existing = localStorage.getItem('krishi_sathi_local_listings');
+  if (existing) {
+    const customListings: CropListing[] = JSON.parse(existing);
+    const filtered = customListings.filter((l) => l.id !== listingId);
+    localStorage.setItem('krishi_sathi_local_listings', JSON.stringify(filtered));
+  }
 }
 
 export async function getListingsByFarmer(farmerId: string): Promise<CropListing[]> {

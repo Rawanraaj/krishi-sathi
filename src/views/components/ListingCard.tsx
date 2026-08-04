@@ -9,10 +9,13 @@ interface ListingCardProps {
   canFavorite?: boolean;
   /** Pass to enable "Order Crop" for buyers. */
   onPlaceOrder?: (orderData: Omit<Order, 'id' | 'createdAt' | 'status'>) => Promise<Order>;
-  /** Current user's profile info — needed for order submissions. */
+  /** Current user's profile info — needed for order submissions and security checks. */
   currentUserId?: string;
   currentUserName?: string;
   currentUserRole?: 'farmer' | 'buyer';
+  /** Pass to enable Edit and Delete actions for owning farmer */
+  onEdit?: (listing: CropListing) => void;
+  onDelete?: (listingId: string) => void;
 }
 
 export const ListingCard: React.FC<ListingCardProps> = ({
@@ -24,6 +27,8 @@ export const ListingCard: React.FC<ListingCardProps> = ({
   currentUserId,
   currentUserName,
   currentUserRole,
+  onEdit,
+  onDelete,
 }) => {
   const [showContact, setShowContact] = useState(false);
   const [showOrderForm, setShowOrderForm] = useState(false);
@@ -222,7 +227,33 @@ export const ListingCard: React.FC<ListingCardProps> = ({
         )}
 
         {/* ── Card footer actions ── */}
-        <div className="crop-card-footer" style={{ flexDirection: 'column' }}>
+        <div className="crop-card-footer" style={{ flexDirection: 'column', gap: '0.5rem' }}>
+          {/* Farmer owner actions: Edit & Delete (Security check: currentUserId === listing.farmerId) */}
+          {currentUserId && currentUserId === listing.farmerId && (onEdit || onDelete) && (
+            <div style={{ display: 'flex', gap: '0.5rem', width: '100%' }}>
+              {onEdit && (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  style={{ flex: 1 }}
+                  onClick={() => onEdit(listing)}
+                >
+                  ✏️ Edit
+                </button>
+              )}
+              {onDelete && (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  style={{ flex: 1, color: '#cf1322', borderColor: '#ffa39e' }}
+                  onClick={() => onDelete(listing.id)}
+                >
+                  🗑️ Delete
+                </button>
+              )}
+            </div>
+          )}
+
           {/* Order button for buyers who haven't ordered yet */}
           {canOrder && !orderSuccess && !showOrderForm && (
             <button

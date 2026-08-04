@@ -2,7 +2,10 @@ import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useDashboard } from '../../viewmodels/useDashboard';
 import { useOrders } from '../../viewmodels/useOrders';
+import { useAuth } from '../../viewmodels/useAuth';
+import { useListings } from '../../viewmodels/useListings';
 import { ListingCard } from '../components/ListingCard';
+import type { CropListing } from '../../models/listing';
 import type { OrderStatus } from '../../models/order';
 
 const STATUS_LABELS: Record<OrderStatus, { label: string; color: string; bg: string }> = {
@@ -13,6 +16,8 @@ const STATUS_LABELS: Record<OrderStatus, { label: string; color: string; bg: str
 };
 
 export const DashboardView: React.FC = () => {
+  const { userProfile } = useAuth();
+  const { editListing, removeListing } = useListings();
   const {
     userRole,
     userEmail,
@@ -20,6 +25,7 @@ export const DashboardView: React.FC = () => {
     favoritedListings,
     totalQuantityProduced,
     loading: dashLoading,
+    refresh: refreshDashboard,
   } = useDashboard();
 
   const {
@@ -34,6 +40,98 @@ export const DashboardView: React.FC = () => {
 
   const [statusUpdating, setStatusUpdating] = useState<string | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
+
+  // Edit / Delete state
+  const [editingListing, setEditingListing] = useState<CropListing | null>(null);
+  const [deletingListingId, setDeletingListingId] = useState<string | null>(null);
+
+  // Edit form field state
+  const [editCropName, setEditCropName] = useState('');
+  const [editQuantity, setEditQuantity] = useState<number | ''>('');
+  const [editUnit, setEditUnit] = useState('kg');
+  const [editPricePerUnit, setEditPricePerUnit] = useState<number | ''>('');
+  const [editLocation, setEditLocation] = useState('');
+  const [editContactInfo, setEditContactInfo] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [editImageUrl, setEditImageUrl] = useState('');
+  const [actionSubmitting, setActionSubmitting] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+
+  const startEditListing = (listing: CropListing) => {
+    // Security check: only allow farmer to edit their own listing
+    if (!userProfile || listing.farmerId !== userProfile.uid) {
+      setActionError('Security error: You can only edit your own listings.');
+      return;
+    }
+    setEditingListing(listing);
+    setEditCropName(listing.cropName);
+    setEditQuantity(listing.quantity);
+    setEditUnit(listing.unit);
+    setEditPricePerUnit(listing.pricePerUnit);
+    setEditLocation(listing.location);
+    setEditContactInfo(listing.contactInfo);
+    setEditDescription(listing.description || '');
+    setEditImageUrl(listing.imageUrl || '');
+    setActionError(null);
+  };
+
+  const handleSaveEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingListing || !userProfile) return;
+
+    if (editingListing.farmerId !== userProfile.uid) {
+      setActionError('Security check failed: You are not authorized to edit this listing.');
+      return;
+    }
+
+    if (!editCropName || !editQuantity || !editPricePerUnit || !editLocation || !editContactInfo) {
+      setActionError('Please complete all required fields.');
+      return;
+    }
+
+    setActionSubmitting(true);
+    setActionError(null);
+    try {
+      await editListing(editingListing.id, {
+        cropName: editCropName,
+        quantity: Number(editQuantity),
+        unit: editUnit,
+        pricePerUnit: Number(editPricePerUnit),
+        location: editLocation,
+        contactInfo: editContactInfo,
+        description: editDescription,
+        imageUrl: editImageUrl || undefined,
+      });
+      setEditingListing(null);
+      refreshDashboard();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to update listing.';
+      setActionError(msg);
+    } finally {
+      setActionSubmitting(false);
+    }
+  };
+
+  const handleDeleteListing = async (listingId: string) => {
+    const target = myFarmerListings.find((l) => l.id === listingId);
+    if (!target || !userProfile || target.farmerId !== userProfile.uid) {
+      setActionError('Security check failed: You are not authorized to delete this listing.');
+      return;
+    }
+
+    setActionSubmitting(true);
+    setActionError(null);
+    try {
+      await removeListing(listingId);
+      setDeletingListingId(null);
+      refreshDashboard();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to delete listing.';
+      setActionError(msg);
+    } finally {
+      setActionSubmitting(false);
+    }
+  };
 
   const handleStatusUpdate = async (orderId: string, newStatus: OrderStatus) => {
     setStatusUpdating(orderId);
@@ -227,6 +325,10 @@ export const DashboardView: React.FC = () => {
           {/* ── Farmer Listings ── */}
           <h2 style={{ fontSize: '1.5rem', marginBottom: '1rem', color: 'var(--primary-900)' }}>Your Published Crop Listings</h2>
 
+          {actionError && (
+            <div className="alert alert-danger" style={{ marginBottom: '1rem' }}>⚠️ {actionError}</div>
+          )}
+
           {myFarmerListings.length === 0 ? (
             <div style={{
               textAlign: 'center',
@@ -247,8 +349,237 @@ export const DashboardView: React.FC = () => {
           ) : (
             <div className="listings-grid">
               {myFarmerListings.map((crop) => (
-                <ListingCard key={crop.id} listing={crop} canFavorite={false} />
+                <ListingCard
+                  key={crop.id}
+                  listing={crop}
+                  canFavorite={false}
+                  currentUserId={userProfile?.uid}
+                  onEdit={startEditListing}
+                  onDelete={(id) => setDeletingListingId(id)}
+                />
               ))}
+            </div>
+          )}
+
+          {/* ── Delete Confirmation Modal / Banner ── */}
+          {deletingListingId && (
+            <div style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: 'rgba(0, 0, 0, 0.5)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 1000,
+              padding: '1rem',
+            }}>
+              <div style={{
+                background: 'white',
+                borderRadius: 'var(--radius-md)',
+                padding: '1.75rem',
+                maxWidth: '450px',
+                width: '100%',
+                boxShadow: 'var(--shadow-md)',
+              }}>
+                <h3 style={{ fontSize: '1.25rem', marginBottom: '0.75rem', color: '#cf1322' }}>
+                  ⚠️ Delete Listing Confirmation
+                </h3>
+                <p style={{ marginBottom: '1.5rem', color: 'var(--text-main)', fontSize: '0.95rem' }}>
+                  Are you sure you want to delete this listing?
+                </p>
+                <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => setDeletingListingId(null)}
+                    disabled={actionSubmitting}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    style={{ backgroundColor: '#cf1322', borderColor: '#cf1322' }}
+                    onClick={() => handleDeleteListing(deletingListingId)}
+                    disabled={actionSubmitting}
+                  >
+                    {actionSubmitting ? 'Deleting...' : 'Delete Listing'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── Edit Listing Form Modal ── */}
+          {editingListing && (
+            <div style={{
+              position: 'fixed',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: 'rgba(0, 0, 0, 0.5)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 1000,
+              padding: '1rem',
+              overflowY: 'auto',
+            }}>
+              <div style={{
+                background: 'white',
+                borderRadius: 'var(--radius-md)',
+                padding: '1.75rem',
+                maxWidth: '600px',
+                width: '100%',
+                maxHeight: '90vh',
+                overflowY: 'auto',
+                boxShadow: 'var(--shadow-md)',
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+                  <h3 style={{ fontSize: '1.35rem', color: 'var(--primary-900)', margin: 0 }}>
+                    ✏️ Edit Crop Listing
+                  </h3>
+                  <button
+                    type="button"
+                    style={{ background: 'none', border: 'none', fontSize: '1.5rem', cursor: 'pointer' }}
+                    onClick={() => setEditingListing(null)}
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                {actionError && (
+                  <div className="alert alert-danger" style={{ marginBottom: '1rem' }}>
+                    ⚠️ {actionError}
+                  </div>
+                )}
+
+                <form onSubmit={handleSaveEdit} noValidate>
+                  <div className="form-group" style={{ marginBottom: '1rem' }}>
+                    <label htmlFor="edit-crop-name" className="form-label">Crop Name *</label>
+                    <input
+                      id="edit-crop-name"
+                      type="text"
+                      className="form-input"
+                      value={editCropName}
+                      onChange={(e) => setEditCropName(e.target.value)}
+                      required
+                    />
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
+                    <div className="form-group">
+                      <label htmlFor="edit-crop-quantity" className="form-label">Quantity Available *</label>
+                      <input
+                        id="edit-crop-quantity"
+                        type="number"
+                        min="1"
+                        className="form-input"
+                        value={editQuantity}
+                        onChange={(e) => setEditQuantity(e.target.value === '' ? '' : Number(e.target.value))}
+                        required
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label htmlFor="edit-crop-unit" className="form-label">Unit *</label>
+                      <select
+                        id="edit-crop-unit"
+                        className="form-select"
+                        value={editUnit}
+                        onChange={(e) => setEditUnit(e.target.value)}
+                      >
+                        <option value="kg">kg (किलोग्राम)</option>
+                        <option value="quintal">quintal (कुन्टल)</option>
+                        <option value="ton">ton (टन)</option>
+                        <option value="sack">sack / bora (बोरा)</option>
+                        <option value="crate">crate (क्रेट)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
+                    <div className="form-group">
+                      <label htmlFor="edit-crop-price" className="form-label">Price Per Unit (NPR रु) *</label>
+                      <input
+                        id="edit-crop-price"
+                        type="number"
+                        min="1"
+                        className="form-input"
+                        value={editPricePerUnit}
+                        onChange={(e) => setEditPricePerUnit(e.target.value === '' ? '' : Number(e.target.value))}
+                        required
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label htmlFor="edit-crop-location" className="form-label">Location / District *</label>
+                      <input
+                        id="edit-crop-location"
+                        type="text"
+                        className="form-input"
+                        value={editLocation}
+                        onChange={(e) => setEditLocation(e.target.value)}
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <div className="form-group" style={{ marginBottom: '1rem' }}>
+                    <label htmlFor="edit-crop-contact" className="form-label">Contact Phone / Mobile Number *</label>
+                    <input
+                      id="edit-crop-contact"
+                      type="tel"
+                      className="form-input"
+                      value={editContactInfo}
+                      onChange={(e) => setEditContactInfo(e.target.value)}
+                      required
+                    />
+                  </div>
+
+                  <div className="form-group" style={{ marginBottom: '1rem' }}>
+                    <label htmlFor="edit-crop-description" className="form-label">Crop Description (Optional)</label>
+                    <textarea
+                      id="edit-crop-description"
+                      className="form-textarea"
+                      rows={3}
+                      value={editDescription}
+                      onChange={(e) => setEditDescription(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="form-group" style={{ marginBottom: '1.5rem' }}>
+                    <label htmlFor="edit-crop-image" className="form-label">Image URL (Optional)</label>
+                    <input
+                      id="edit-crop-image"
+                      type="url"
+                      className="form-input"
+                      value={editImageUrl}
+                      onChange={(e) => setEditImageUrl(e.target.value)}
+                    />
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={() => setEditingListing(null)}
+                      disabled={actionSubmitting}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      className="btn btn-primary"
+                      disabled={actionSubmitting}
+                    >
+                      {actionSubmitting ? 'Saving Changes...' : 'Save Changes'}
+                    </button>
+                  </div>
+                </form>
+              </div>
             </div>
           )}
         </div>
